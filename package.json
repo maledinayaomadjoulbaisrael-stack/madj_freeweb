@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "npx freeweb-mcp@latest",
+   "start": "npx -y supergateway --stdio \"npx -y freeweb-mcp@latest\" --outputTransport streamableHttp --port $PORT --streamableHttpPath /mcp",
     "dev": "tsc --watch & node --watch dist/server.js",
     "test": "vitest run"
   },
