@@ -5,32 +5,74 @@ import { Request, Response, NextFunction } from "express";
 import { timingSafeEqual } from "node:crypto";
 import { z } from "zod/v4";
 
+// Import des outils de freeweb-mcp
+import { webSearch, searchAndBrowse, browsePage } from "freeweb-mcp";
+
 const MCP_API_TOKEN = process.env.MCP_API_TOKEN;
 
-// Called per request — stateless mode means no session persistence,
-// which is required for horizontally scaled deployments.
 export function createServer(): McpServer {
   const server = new McpServer(
-    { name: "my-mcp-server", version: "1.0.0" },
+    { name: "madj-freeweb", version: "1.0.0" },
     { capabilities: { logging: {} } },
   );
 
-  // Add tools here. `description` is surfaced to LLMs; Zod schemas
-  // in `inputSchema` are converted to JSON Schema automatically.
+  // Outil 1 : Recherche web simple
   server.registerTool(
-    "hello",
+    "web_search",
     {
-      description: "Say hello to someone",
-      inputSchema: { name: z.string() },
+      description: "Search the public web without API keys. Returns a list of results (title, URL, snippet).",
+      inputSchema: {
+        query: z.string().describe("The search query"),
+        maxResults: z.number().optional().default(10).describe("Maximum number of results (1-50)"),
+      },
     },
-    async ({ name }) => ({
-      content: [{ type: "text", text: `Hello, ${name}!` }],
-    }),
+    async ({ query, maxResults }) => {
+      const results = await webSearch(query, { maxResults });
+      return {
+        content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+      };
+    },
+  );
+
+  // Outil 2 : Recherche + lecture des pages
+  server.registerTool(
+    "search_and_browse",
+    {
+      description: "Search the web, open the best hits, extract readable content, and return a synthesis.",
+      inputSchema: {
+        query: z.string().describe("The search query"),
+        maxResults: z.number().optional().default(3).describe("Number of pages to browse (1-10)"),
+      },
+    },
+    async ({ query, maxResults }) => {
+      const results = await searchAndBrowse(query, { maxResults });
+      return {
+        content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+      };
+    },
+  );
+
+  // Outil 3 : Lire une page spécifique
+  server.registerTool(
+    "browse_page",
+    {
+      description: "Visit a URL, read it, and extract the main readable content.",
+      inputSchema: {
+        url: z.string().url().describe("The URL to fetch"),
+      },
+    },
+    async ({ url }) => {
+      const content = await browsePage(url);
+      return {
+        content: [{ type: "text", text: content }],
+      };
+    },
   );
 
   return server;
 }
 
+// Le reste du fichier (auth, express app, routes /mcp, /health) ne change pas
 const RENDER_EXTERNAL_HOSTNAME = process.env.RENDER_EXTERNAL_HOSTNAME;
 
 export const app = createMcpExpressApp({
@@ -38,9 +80,6 @@ export const app = createMcpExpressApp({
   allowedHosts: RENDER_EXTERNAL_HOSTNAME ? [RENDER_EXTERNAL_HOSTNAME] : undefined,
 });
 
-// Simple bearer token auth. For multi-user or production setups,
-// consider upgrading to the MCP SDK's built-in OAuth 2.1 support.
-// When no token is set (local dev), auth is disabled entirely.
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.path === "/health" || !MCP_API_TOKEN) {
     next();
@@ -49,7 +88,6 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
   const auth = req.headers.authorization ?? "";
   const expected = `Bearer ${MCP_API_TOKEN}`;
-  // timingSafeEqual requires equal-length buffers, so check length first
   if (
     auth.length === expected.length &&
     timingSafeEqual(Buffer.from(auth), Buffer.from(expected))
@@ -72,7 +110,6 @@ app.get("/health", (_req: Request, res: Response) => {
 app.post("/mcp", async (req: Request, res: Response) => {
   const server = createServer();
   try {
-    // sessionIdGenerator: undefined → stateless (no session tracking)
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });
@@ -94,8 +131,6 @@ app.post("/mcp", async (req: Request, res: Response) => {
   }
 });
 
-// GET and DELETE on /mcp are part of the Streamable HTTP spec but
-// only apply to stateful servers. Reject explicitly for clarity.
 app.get("/mcp", (_req: Request, res: Response) => {
   res.status(405).json({
     jsonrpc: "2.0",

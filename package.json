@@ -12,6 +12,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "express": "^5.2.0",
+    "freeweb-mcp": "^3.4.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
